@@ -45,6 +45,7 @@ import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
 import org.apache.hadoop.hive.metastore.minihms.AbstractMetaStoreService;
 import org.apache.hadoop.hive.metastore.partition.spec.PartitionSpecProxy;
 import org.apache.thrift.TException;
+import org.apache.thrift.TApplicationException;
 import org.apache.thrift.protocol.TProtocolException;
 import org.apache.thrift.transport.TTransportException;
 
@@ -483,7 +484,7 @@ public class TestListPartitions extends MetaStoreClientTest {
       createTable4PartColsParts(client);
       client.listPartitionSpecs(DB_NAME, null, -1);
       fail("Should have thrown exception");
-    } catch (NullPointerException | TTransportException e) {
+    } catch (NullPointerException | TTransportException | TApplicationException e) {
       //TODO: should not throw different exceptions for different HMS deployment types
     }
   }
@@ -1335,7 +1336,7 @@ public class TestListPartitions extends MetaStoreClientTest {
               partitionSchema);
       client.listPartitionValues(request);
       fail("Should have thrown exception");
-    } catch (IndexOutOfBoundsException | TTransportException e) {
+    } catch (IndexOutOfBoundsException | TException e) {
       //TODO: should not throw different exceptions for different HMS deployment types
     }
   }
