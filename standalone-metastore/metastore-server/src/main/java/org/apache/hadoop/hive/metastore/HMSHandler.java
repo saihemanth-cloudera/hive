@@ -3568,7 +3568,25 @@ public class HMSHandler extends FacebookBase implements IHMSHandler {
           catalog, database, tables);
 
       if (tables.size() > 0) {
-        tObjects = getMS().getTableObjectsByName(catalog, database, tables);
+        int tableBatchSize = MetastoreConf.getIntVar(conf, ConfVars.BATCH_RETRIEVE_MAX);
+        List<String> distinctTableNames = tables;
+        if (distinctTableNames.size() > tableBatchSize) {
+          List<String> lowercaseTableNames = new ArrayList<>();
+          for (String tableName : tables) {
+            lowercaseTableNames.add(org.apache.hadoop.hive.metastore.utils.StringUtils.normalizeIdentifier(tableName));
+          }
+          distinctTableNames = new ArrayList<>(new HashSet<>(lowercaseTableNames));
+        }
+
+        int startIndex = 0;
+        // Retrieve the tables from the metastore in batches. Some databases like
+        // Oracle cannot have over 1000 expressions in a in-list
+        while (startIndex < distinctTableNames.size()) {
+          int endIndex = Math.min(startIndex + tableBatchSize, distinctTableNames.size());
+          tObjects.addAll(getMS().getTableObjectsByName(catalog, database, distinctTableNames.subList(
+                  startIndex, endIndex), null, null));
+          startIndex = endIndex;
+        }
         LOG.debug("get_tables_ext:getTableObjectsByName() returned " + tObjects.size());
         if (processorCapabilities == null || processorCapabilities.size() == 0 ||
             processorCapabilities.contains("MANAGERAWMETADATA")) {
@@ -3831,9 +3849,11 @@ public class HMSHandler extends FacebookBase implements IHMSHandler {
         throw new UnknownDBException("DB name is null or empty");
       }
       RawStore ms = getMS();
-      if(tablePattern != null){
+      if (tablePattern == null && tableNames == null) {
+        throw new InvalidOperationException(dbName + " cannot find null tables");
+      } else if (tablePattern != null && (tableNames == null || tableNames.isEmpty())){
         tables = ms.getTableObjectsByName(catName, dbName, tableNames, projectionsSpec, tablePattern);
-      }else {
+      } else {
         if (tableNames == null) {
           throw new InvalidOperationException(dbName + " cannot find null tables");
         }
@@ -6071,15 +6091,11 @@ public class HMSHandler extends FacebookBase implements IHMSHandler {
     } catch (Exception e) { /* appears we return empty set instead of throwing an exception */ }
 
     try {
-      ret = getMS().getTables(parsedDbName[CAT_NAME], parsedDbName[DB_NAME], pattern);
-      if(ret !=  null && !ret.isEmpty()) {
-        List<Table> tableInfo = new ArrayList<>();
-        tableInfo = getMS().getTableObjectsByName(parsedDbName[CAT_NAME], parsedDbName[DB_NAME], ret);
-        tableInfo = FilterUtils.filterTablesIfEnabled(isServerFilterEnabled, filterHook, tableInfo);// tableInfo object has the owner information of the table which is being passed to FilterUtils.
-        ret = new ArrayList<>();
-        for (Table tbl : tableInfo) {
-          ret.add(tbl.getTableName());
-        }
+      List<Table> tableInfo = getMS().getTableObjectsByName(parsedDbName[CAT_NAME], parsedDbName[DB_NAME], null, null, pattern);
+      tableInfo = FilterUtils.filterTablesIfEnabled(isServerFilterEnabled, filterHook, tableInfo);
+      ret = new ArrayList<>();
+      for (Table tbl : tableInfo) {
+        ret.add(tbl.getTableName());
       }
     } catch (MetaException e) {
       ex = e;
