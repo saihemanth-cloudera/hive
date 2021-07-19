@@ -108,6 +108,7 @@ public class ThriftHttpServlet extends TServlet {
   private final HiveAuthFactory hiveAuthFactory;
   private static final String HIVE_DELEGATION_TOKEN_HEADER =  "X-Hive-Delegation-Token";
   private static final String X_FORWARDED_FOR = "X-Forwarded-For";
+  private static final String TRUSTED_PROXY_AUTH_HEADER = "X-Trusted-Proxy-Auth-Header";
 
   public ThriftHttpServlet(TProcessor processor, TProtocolFactory protocolFactory,
       String authType, UserGroupInformation serviceUGI, UserGroupInformation httpUGI,
@@ -222,8 +223,12 @@ public class ThriftHttpServlet extends TServlet {
               clientUserName = doSamlAuth(request, response);
             }
           } else {
-            // For password based authentication
-            clientUserName = doPasswdAuth(request, authType);
+            if (request.getHeader(TRUSTED_PROXY_AUTH_HEADER) != null) { //Trusted header is present, which means the user is already authorized.
+              clientUserName = getUsername(request, authType);
+            } else {
+              // For password based authentication
+              clientUserName = doPasswdAuth(request, authType);
+            }
           }
         }
       }
