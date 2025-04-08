@@ -584,7 +584,7 @@ public class MetastoreConf {
         "it is desirable to configure metastore.thrift.bind.host on the intended leader HMS."),
     METASTORE_HOUSEKEEPING_LEADER_ELECTION("metastore.housekeeping.leader.election",
         "metastore.housekeeping.leader.election",
-        "host", new StringSetValidator("host", "lock"),
+        "lock", new StringSetValidator("host", "lock"),
         "Set to host, HMS will choose the leader by the configured metastore.housekeeping.leader.hostname.\n" +
         "Set to lock, HMS will use the Hive lock to elect the leader."),
     METASTORE_HOUSEKEEPING_LEADER_AUDITTABLE("metastore.housekeeping.leader.auditTable",
@@ -603,7 +603,7 @@ public class MetastoreConf {
         "metastore.housekeeping.leader.lock.namespace", "",
         "The database where the Hive lock sits when metastore.housekeeping.leader.election is set to lock."),
     METASTORE_HOUSEKEEPING_THREADS_ON("metastore.housekeeping.threads.on",
-        "hive.metastore.housekeeping.threads.on", false,
+        "hive.metastore.housekeeping.threads.on", true,
         "Whether to run the tasks under metastore.task.threads.remote on this metastore instance or not.\n" +
             "Set this to true on one instance of the Thrift metastore service as part of turning\n" +
             "on Hive transactions. For a complete list of parameters required for turning on\n" +
@@ -638,12 +638,12 @@ public class MetastoreConf {
         "hive.txn.acid.metrics.delta.pct.threshold", 0.01f,
         "Percentage (fractional) size of the delta files relative to the base directory. Deltas smaller than this threshold " +
             "count as small deltas. Default 0.01 = 1%.)"),
-    COMPACTOR_INITIATOR_ON("metastore.compactor.initiator.on", "hive.compactor.initiator.on", false,
+    COMPACTOR_INITIATOR_ON("metastore.compactor.initiator.on", "hive.compactor.initiator.on", true,
         "Whether to run the initiator thread on this metastore instance or not.\n" +
             "Set this to true on one instance of the Thrift metastore service as part of turning\n" +
             "on Hive transactions. For a complete list of parameters required for turning on\n" +
             "transactions, see hive.txn.manager."),
-    COMPACTOR_CLEANER_ON("metastore.compactor.cleaner.on", "hive.compactor.cleaner.on", false,
+    COMPACTOR_CLEANER_ON("metastore.compactor.cleaner.on", "hive.compactor.cleaner.on", true,
         "Whether to run the cleaner thread on this metastore instance or not.\n" +
             "Set this to true on one instance of the Thrift metastore service as part of turning\n" +
             "on Hive transactions. For a complete list of parameters required for turning on\n" +
@@ -1799,8 +1799,6 @@ public class MetastoreConf {
         "hive.metastore.custom.database.product.classname", "none",
           "Hook for external RDBMS. This class will be instantiated only when " +
           "metastore.use.custom.database.product is set to true."),
-    HIVE_BLOBSTORE_SUPPORTED_SCHEMES("hive.blobstore.supported.schemes", "hive.blobstore.supported.schemes", "s3,s3a,s3n",
-            "Comma-separated list of supported blobstore schemes."),
 
     // Property-maps
     PROPERTIES_CACHE_CAPACITY("hive.metastore.properties.cache.capacity",
@@ -1823,7 +1821,45 @@ public class MetastoreConf {
     ),
     PROPERTIES_SERVLET_AUTH("hive.metastore.properties.servlet.auth",
         "hive.metastore.properties.servlet.auth", "jwt",
+            new StringSetValidator("simple", "jwt"),
         "Property-maps servlet authentication method (simple or jwt)."
+    ),
+    ICEBERG_CATALOG_SERVLET_FACTORY("hive.metastore.catalog.servlet.factory",
+            "hive.metastore.catalog.servlet.factory",
+            "org.apache.iceberg.rest.HMSCatalogFactory",
+            "HMS Iceberg Catalog servlet factory class name."
+            + "The factory needs to expose a method: "
+            + "public static HttpServlet createServlet(Configuration configuration);"
+    ),
+    ICEBERG_CATALOG_SERVLET_PATH("hive.metastore.catalog.servlet.path",
+        "hive.metastore.catalog.servlet.path", "iceberg",
+        "HMS Iceberg Catalog servlet path component of URL endpoint."
+    ),
+    ICEBERG_CATALOG_SERVLET_PORT("hive.metastore.catalog.servlet.port",
+        "hive.metastore.catalog.servlet.port", -1,
+        "HMS Iceberg Catalog servlet server port. Negative value disables the servlet," +
+            " 0 will let the system determine the catalog server port," +
+            " positive value will be used as-is."
+    ),
+    ICEBERG_CATALOG_SERVLET_AUTH("hive.metastore.catalog.servlet.auth",
+        "hive.metastore.catalog.servlet.auth", "jwt", new StringSetValidator("simple", "jwt"),
+        "HMS Iceberg Catalog servlet authentication method (simple or jwt)."
+    ),
+    ICEBERG_CATALOG_CACHE_EXPIRY("hive.metastore.catalog.cache.expiry",
+        "hive.metastore.catalog.cache.expiry", 60_000L,
+        "HMS Iceberg Catalog cache expiry."
+    ),
+    HTTPSERVER_THREADPOOL_MIN("hive.metastore.httpserver.threadpool.min",
+            "hive.metastore.httpserver.threadpool.min", 8,
+            "HMS embedded HTTP server minimum number of threads."
+    ),
+    HTTPSERVER_THREADPOOL_MAX("hive.metastore.httpserver.threadpool.max",
+            "hive.metastore.httpserver.threadpool.max", 256,
+            "HMS embedded HTTP server maximum number of threads."
+    ),
+    HTTPSERVER_THREADPOOL_IDLE("hive.metastore.httpserver.threadpool.idle",
+            "hive.metastore.httpserver.threadpool.idle", 60_000L,
+            "HMS embedded HTTP server thread idle time."
     ),
 
     // Deprecated Hive values that we are keeping for backwards compatibility.

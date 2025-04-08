@@ -157,6 +157,7 @@ TOK_STRUCT;
 TOK_MAP;
 TOK_UNIONTYPE;
 TOK_COLTYPELIST;
+TOK_CREATECATALOG;
 TOK_CREATEDATABASE;
 TOK_CREATEDATACONNECTOR;
 TOK_CREATETABLE;
@@ -229,6 +230,7 @@ TOK_RETAIN;
 TOK_WITH_SNAPSHOT_RETENTION;
 TOK_ALTERTABLE_CONVERT;
 TOK_MSCK;
+TOK_SHOWCATALOGS;
 TOK_SHOWDATABASES;
 TOK_SHOWDATACONNECTORS;
 TOK_SHOWTABLES;
@@ -246,6 +248,7 @@ TOK_UNLOCKTABLE;
 TOK_LOCKDB;
 TOK_UNLOCKDB;
 TOK_SWITCHDATABASE;
+TOK_DROPCATALOG;
 TOK_DROPDATABASE;
 TOK_DROPTABLE;
 TOK_DATABASECOMMENT;
@@ -369,6 +372,10 @@ TOK_SHOW_ROLES;
 TOK_SHOW_CURRENT_ROLE;
 TOK_SHOW_ROLE_PRINCIPALS;
 TOK_SHOWDBLOCKS;
+TOK_DESCCATALOG;
+TOK_CATALOGLOCATION;
+TOK_CATALOGCOMMENT;
+TOK_ALTERCATALOG_LOCATION;
 TOK_DESCDATABASE;
 TOK_DATABASEPROPERTIES;
 TOK_DATABASELOCATION;
@@ -514,6 +521,7 @@ TOK_AS_OF_TIME;
 TOK_AS_OF_VERSION;
 TOK_FROM_VERSION;
 TOK_AS_OF_TAG;
+TOK_WRITE_LOCALLY_ORDERED;
 }
 
 
@@ -558,6 +566,8 @@ import org.apache.hadoop.hive.conf.HiveConf;
     xlateMap.put("KW_NULLS", "NULLS");
     xlateMap.put("KW_LAST", "LAST");
     xlateMap.put("KW_ORDER", "ORDER");
+    xlateMap.put("KW_ORDERED", "ORDERED");
+    xlateMap.put("KW_LOCALLY", "LOCALLY");
     xlateMap.put("KW_BY", "BY");
     xlateMap.put("KW_GROUP", "GROUP");
     xlateMap.put("KW_WHERE", "WHERE");
@@ -997,7 +1007,9 @@ importStatement
 ddlStatement
 @init { pushMsg("ddl statement", state); }
 @after { popMsg(state); }
-    : createDatabaseStatement
+    : createCatalogStatement
+    | dropCatalogStatement
+    | createDatabaseStatement
     | switchDatabaseStatement
     | dropDatabaseStatement
     | createTableStatement
@@ -1097,6 +1109,38 @@ orReplace
 @after { popMsg(state); }
     : KW_OR KW_REPLACE
     -> ^(TOK_ORREPLACE)
+    ;
+
+createCatalogStatement
+@init { pushMsg("create catalog statement", state); }
+@after { popMsg(state); }
+    : KW_CREATE KW_CATALOG
+        ifNotExists?
+        name=identifier
+        catLocation
+        catalogComment?
+    -> ^(TOK_CREATECATALOG $name catLocation ifNotExists? catalogComment?)
+    ;
+
+catLocation
+@init { pushMsg("catalog location specification", state); }
+@after { popMsg(state); }
+    :
+      KW_LOCATION locn=StringLiteral -> ^(TOK_CATALOGLOCATION $locn)
+    ;
+
+catalogComment
+@init { pushMsg("catalog's comment", state); }
+@after { popMsg(state); }
+    : KW_COMMENT comment=StringLiteral
+    -> ^(TOK_CATALOGCOMMENT $comment)
+    ;
+
+dropCatalogStatement
+@init { pushMsg("drop catalog statement", state); }
+@after { popMsg(state); }
+    : KW_DROP KW_CATALOG ifExists? identifier
+    -> ^(TOK_DROPCATALOG identifier ifExists?)
     ;
 
 createDatabaseStatement
@@ -1230,6 +1274,8 @@ descStatement
     :
     (KW_DESCRIBE|KW_DESC)
     (
+    (KW_CATALOG) => (KW_CATALOG) KW_EXTENDED? (catName=identifier) -> ^(TOK_DESCCATALOG $catName KW_EXTENDED?)
+    |
     (KW_DATABASE|KW_SCHEMA) => (KW_DATABASE|KW_SCHEMA) KW_EXTENDED? (dbName=identifier) -> ^(TOK_DESCDATABASE $dbName KW_EXTENDED?)
     |
     (KW_DATACONNECTOR) => (KW_DATACONNECTOR) KW_EXTENDED? (dcName=identifier) -> ^(TOK_DESCDATACONNECTOR $dcName KW_EXTENDED?)
@@ -1258,7 +1304,8 @@ analyzeStatement
 showStatement
 @init { pushMsg("show statement", state); }
 @after { popMsg(state); }
-    : KW_SHOW (KW_DATABASES|KW_SCHEMAS) (KW_LIKE showStmtIdentifier)? -> ^(TOK_SHOWDATABASES showStmtIdentifier?)
+    : KW_SHOW KW_CATALOGS (KW_LIKE showStmtIdentifier)? -> ^(TOK_SHOWCATALOGS showStmtIdentifier?)
+    | KW_SHOW (KW_DATABASES|KW_SCHEMAS) (KW_LIKE showStmtIdentifier)? -> ^(TOK_SHOWDATABASES showStmtIdentifier?)
     | KW_SHOW (isExtended=KW_EXTENDED)? KW_TABLES ((KW_FROM|KW_IN) db_name=identifier)? (filter=showTablesFilterExpr)?
     -> ^(TOK_SHOWTABLES (TOK_FROM $db_name)? $filter? $isExtended?)
     | KW_SHOW KW_VIEWS ((KW_FROM|KW_IN) db_name=identifier)? (KW_LIKE showStmtIdentifier|showStmtIdentifier)?  -> ^(TOK_SHOWVIEWS (TOK_FROM $db_name)? showStmtIdentifier?)
@@ -1818,6 +1865,14 @@ tableImplBuckets
     -> ^(TOK_ALTERTABLE_BUCKETS $num)
     ;
 
+tableWriteLocallyOrdered
+@init { pushMsg("table sorted specification", state); }
+@after { popMsg(state); }
+    :
+      KW_WRITE KW_LOCALLY KW_ORDERED KW_BY sortCols=columnNameOrderList
+    -> ^(TOK_WRITE_LOCALLY_ORDERED $sortCols?)
+    ;
+    
 tableSkewed
 @init { pushMsg("table skewed specification", state); }
 @after { popMsg(state); }
@@ -2179,6 +2234,8 @@ columnNameOrder
             ^(TOK_TABSORTCOLNAMEDESC ^(TOK_NULLS_LAST identifier))
     -> {$orderSpec.tree.getType()==HiveParser.KW_ASC}?
             ^(TOK_TABSORTCOLNAMEASC ^($nullSpec identifier))
+    -> {$orderSpec.tree.getType()==HiveParser.KW_DESC}?
+            ^(TOK_TABSORTCOLNAMEDESC ^($nullSpec identifier))
     -> ^(TOK_TABSORTCOLNAMEDESC ^($nullSpec identifier))
     ;
 

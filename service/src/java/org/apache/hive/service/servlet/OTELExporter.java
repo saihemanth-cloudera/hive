@@ -34,6 +34,7 @@ import io.opentelemetry.sdk.internal.AttributesMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.common.OTELJavaMetrics;
 import org.apache.hadoop.hive.ql.QueryDisplay;
 import org.apache.hadoop.hive.ql.QueryInfo;
@@ -65,8 +66,13 @@ public class OTELExporter extends Thread {
   @Override
   public void run() {
     while (true) {
-      jvmMetrics.setJvmMetrics();
-      exposeMetricsToOTEL();
+      try {
+        jvmMetrics.setJvmMetrics();
+        exposeMetricsToOTEL();
+      } catch (Throwable e) {
+        LOG.error("Exception occurred in OTELExporter thread ", e);
+      }
+      
       try {
         Thread.sleep(frequency);
       } catch (InterruptedException e) {
@@ -81,8 +87,8 @@ public class OTELExporter extends Thread {
 
     LOG.debug("Found {} liveQueries and {} historicalQueries", liveQueries.size(), historicalQueries.size());
 
-    for (QueryInfo lQuery: liveQueries){
-      if(lQuery.getQueryDisplay() == null){
+    for (QueryInfo lQuery : liveQueries) {
+      if (lQuery.getQueryDisplay() == null || StringUtils.isEmpty(lQuery.getQueryDisplay().getQueryId())) {
         continue;
       }
       String queryID = lQuery.getQueryDisplay().getQueryId();
@@ -136,55 +142,57 @@ public class OTELExporter extends Thread {
 
     Set<String> historicalQueryIDs = new HashSet<>();
     for (QueryInfo hQuery : historicalQueries) {
-      String hQueryId = hQuery.getQueryDisplay().getQueryId();
-      historicalQueryIDs.add(hQueryId);
-      Span rootspan = queryIdToSpanMap.remove(hQueryId);
-      Set<String> completedTasks = queryIdToTasksMap.remove(hQueryId);
+      if (hQuery.getEndTime() != null) {
+        String hQueryId = hQuery.getQueryDisplay().getQueryId();
+        historicalQueryIDs.add(hQueryId);
+        Span rootspan = queryIdToSpanMap.remove(hQueryId);
+        Set<String> completedTasks = queryIdToTasksMap.remove(hQueryId);
 
-      //For queries that were live till last loop but have ended before start of this loop
-      if (rootspan != null) {
-        for (QueryDisplay.TaskDisplay task : hQuery.getQueryDisplay().getTaskDisplays()) {
-          if (!completedTasks.contains(task.getTaskId())) {
-            Context parentContext = Context.current().with(rootspan);
+        //For queries that were live till last loop but have ended before start of this loop
+        if (rootspan != null) {
+          for (QueryDisplay.TaskDisplay task : hQuery.getQueryDisplay().getTaskDisplays()) {
+            if (!completedTasks.contains(task.getTaskId())) {
+              Context parentContext = Context.current().with(rootspan);
+              tracer.spanBuilder(hQueryId + " - " + task.getTaskId())
+                      .setParent(parentContext).setAllAttributes(addTaskAttributes(task))
+                      .setStartTimestamp(task.getBeginTime(), TimeUnit.MILLISECONDS).startSpan()
+                      .end(task.getEndTime(), TimeUnit.MILLISECONDS);
+            }
+          }
+  
+          //Update the rootSpan name & attributes before ending it
+          rootspan.updateName(hQueryId + " - completed").setAllAttributes(addQueryAttributes(hQuery))
+                  .end(hQuery.getEndTime(), TimeUnit.MILLISECONDS);
+          historicalQueryId.add(hQueryId);
+        }
+
+        //For queries that already ended either before OTEL service started or in between OTEL loops
+        if (historicalQueryId.add(hQueryId)) {
+          rootspan = tracer.spanBuilder(hQueryId + " - completed")
+                  .setStartTimestamp(hQuery.getBeginTime(), TimeUnit.MILLISECONDS).startSpan();
+          Context parentContext = Context.current().with(rootspan);
+          
+          Span initSpan = tracer.spanBuilder(hQueryId).setParent(parentContext)
+                  .setStartTimestamp(hQuery.getBeginTime(), TimeUnit.MILLISECONDS).startSpan()
+                  .setAttribute("QueryId", hQueryId)
+                  .setAttribute("QueryString", hQuery.getQueryDisplay().getQueryString())
+                  .setAttribute("UserName", hQuery.getUserName())
+                  .setAttribute("ExecutionEngine", hQuery.getExecutionEngine());
+          if (hQuery.getQueryDisplay().getErrorMessage() != null) {
+            initSpan.setAttribute("ErrorMessage", hQuery.getQueryDisplay().getErrorMessage());
+          }
+          initSpan.end(hQuery.getBeginTime(), TimeUnit.MILLISECONDS);
+
+          for (QueryDisplay.TaskDisplay task : hQuery.getQueryDisplay().getTaskDisplays()) {
+            parentContext = Context.current().with(rootspan);
             tracer.spanBuilder(hQueryId + " - " + task.getTaskId())
                     .setParent(parentContext).setAllAttributes(addTaskAttributes(task))
                     .setStartTimestamp(task.getBeginTime(), TimeUnit.MILLISECONDS).startSpan()
                     .end(task.getEndTime(), TimeUnit.MILLISECONDS);
           }
+
+          rootspan.setAllAttributes(addQueryAttributes(hQuery)).end(hQuery.getEndTime(), TimeUnit.MILLISECONDS);
         }
-
-        //Update the rootSpan name & attributes before ending it
-        rootspan.updateName(hQueryId + " - completed").setAllAttributes(addQueryAttributes(hQuery))
-                .end(hQuery.getEndTime(), TimeUnit.MILLISECONDS);
-        historicalQueryId.add(hQueryId);
-      }
-
-      //For queries that already ended either before OTEL service started or in between OTEL loops
-      if (historicalQueryId.add(hQueryId)) {
-        rootspan = tracer.spanBuilder(hQueryId + " - completed")
-                .setStartTimestamp(hQuery.getBeginTime(), TimeUnit.MILLISECONDS).startSpan();
-        Context parentContext = Context.current().with(rootspan);
-
-        Span initSpan = tracer.spanBuilder(hQueryId).setParent(parentContext)
-                .setStartTimestamp(hQuery.getBeginTime(), TimeUnit.MILLISECONDS).startSpan()
-                .setAttribute("QueryId", hQueryId)
-                .setAttribute("QueryString", hQuery.getQueryDisplay().getQueryString())
-                .setAttribute("UserName", hQuery.getUserName())
-                .setAttribute("ExecutionEngine", hQuery.getExecutionEngine());
-        if (hQuery.getQueryDisplay().getErrorMessage() != null) {
-          initSpan.setAttribute("ErrorMessage", hQuery.getQueryDisplay().getErrorMessage());
-        }
-        initSpan.end(hQuery.getBeginTime(), TimeUnit.MILLISECONDS);
-
-        for (QueryDisplay.TaskDisplay task : hQuery.getQueryDisplay().getTaskDisplays()) {
-          parentContext = Context.current().with(rootspan);
-          tracer.spanBuilder(hQueryId + " - " + task.getTaskId())
-                  .setParent(parentContext).setAllAttributes(addTaskAttributes(task))
-                  .setStartTimestamp(task.getBeginTime(), TimeUnit.MILLISECONDS).startSpan()
-                  .end(task.getEndTime(), TimeUnit.MILLISECONDS);
-        }
-        
-        rootspan.setAllAttributes(addQueryAttributes(hQuery)).end(hQuery.getEndTime(), TimeUnit.MILLISECONDS);
       }
     }
     

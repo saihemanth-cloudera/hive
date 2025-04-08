@@ -52,7 +52,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.slf4j.Logger;
@@ -61,8 +60,6 @@ import org.slf4j.LoggerFactory;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.ok;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 /*
 Tests JWT auth in HiveMetastore server.
@@ -97,9 +94,7 @@ public class TestRemoteHiveMetastoreWithHttpJwt {
   public static void makeEnvModifiable() throws Exception {
     envMap = new HashMap<>();
     Class<?> envClass = Class.forName("java.lang.ProcessEnvironment");
-    Field theEnvironmentField = envClass.getDeclaredField("theEnvironment");
     Field theUnmodifiableEnvironmentField = envClass.getDeclaredField("theUnmodifiableEnvironment");
-    removeStaticFinalAndSetValue(theEnvironmentField, envMap);
     removeStaticFinalAndSetValue(theUnmodifiableEnvironmentField, envMap);
   }
 
